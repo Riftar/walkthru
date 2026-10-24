@@ -33,23 +33,41 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _scene_response(self, path, width):
+        try:
+            params = {"plan_width_m": width} if width else {}
+            p = plan_mod.load_plan(path, **params)
+            body = scene_mod.scene_json(p).encode()
+        except Exception as e:  # parser boundary: never leak a traceback
+            return self._send(422, ("parse failed: %s" % e).encode())
+        return self._send(200, body, "application/json")
+
+    @staticmethod
+    def _width(query):
+        qs = parse_qs(query)
+        raw = (qs.get("width") or [""])[0]
+        if not raw:
+            return None
+        try:
+            w = float(raw)
+        except ValueError:
+            return -1
+        return w if 1.0 <= w <= 200.0 else -1
+
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == "/api/scene":
-            qs = parse_qs(url.query)
-            name = (qs.get("plan") or [""])[0]
+            name = (parse_qs(url.query).get("plan") or [""])[0]
+            width = self._width(url.query)
+            if width == -1:
+                return self._send(400, b"width must be meters in [1,200]")
             base = posixpath.basename(name)
             if name != base or not name.endswith(".png"):
                 return self._send(400, b"bad plan name")
             path = os.path.join(FIXTURES, base)
             if not os.path.isfile(path):
                 return self._send(404, b"no such plan")
-            try:
-                p = plan_mod.load_plan(path)
-                body = scene_mod.scene_json(p).encode()
-            except Exception as e:  # parser boundary: never leak a traceback
-                return self._send(422, ("parse failed: %s" % e).encode())
-            return self._send(200, body, "application/json")
+            return self._scene_response(path, width)
 
         rel = "index.html" if url.path == "/" else url.path.lstrip("/")
         base = posixpath.basename(rel)
@@ -62,6 +80,31 @@ class Handler(BaseHTTPRequestHandler):
             body = f.read()
         ext = os.path.splitext(rel)[1]
         return self._send(200, body, TYPES.get(ext, "application/octet-stream"))
+
+
+    def do_POST(self):
+        # Upload a plan PNG (raw body) -> parsed scene. Loopback tool:
+        # body capped, written to a temp file, deleted after parsing.
+        if urlparse(self.path).path != "/api/plan":
+            return self._send(404, b"not found")
+        width = self._width(urlparse(self.path).query)
+        if width == -1:
+            return self._send(400, b"width must be meters in [1,200]")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return self._send(400, b"bad content-length")
+        if not 1 <= length <= 20 * 1024 * 1024:
+            return self._send(413, b"body must be 1 byte..20MB")
+        data = self.rfile.read(length)
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".png")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            return self._scene_response(path, width)
+        finally:
+            os.unlink(path)
 
 
 def main():

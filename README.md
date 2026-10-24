@@ -17,9 +17,16 @@ python3 -m walkthru.server 8000
 # open http://127.0.0.1:8000/?plan=flat1.png
 ```
 
-WASD to move (A/D strafe), arrow left/right to turn. The minimap
+WASD to move (A/D strafe), arrow left/right to turn, M toggles the
+menu. The menu loads any of the demo plans, uploads your own PNG
+(parsed server-side, never persisted), and sets the plan's real-world
+width in meters — areas and the HUD rescale instantly. The minimap
 colors each detected room; the HUD shows the room you are standing in
 and its measured area.
+
+The renderer is fully textured — brick walls, wood doors, plank
+floor, plaster ceiling — with textures generated procedurally in the
+client (seeded, deterministic, zero assets).
 
 ## How it works
 
@@ -39,9 +46,10 @@ and its measured area.
 - `walkthru/server.py` — stdlib `http.server`, loopback by default;
   serves `www/` and `/api/scene?plan=<name>` (names resolve strictly
   inside `fixtures/`).
-- `www/index.html` — the whole client: a DDA raycaster on canvas
-  (Wolfenstein-style — a floor plan needs no mesh), doors rendered in
-  wood, fog with distance, minimap, room HUD.
+- `www/index.html` — the whole client: a textured DDA raycaster on
+  canvas (Wolfenstein-style — a floor plan needs no mesh) with
+  floor/ceiling casting, procedural seeded textures, distance shading,
+  minimap, room HUD, and a menu (plan picker, PNG upload, scale).
 - `fixtures/gen_plans.py` — deterministic demo plans (three layouts);
   fixtures are generated, never hand-edited.
 - `tests/` — offline `unittest` suite; loopback-only. Asserts room and
