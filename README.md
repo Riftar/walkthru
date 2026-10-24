@@ -19,8 +19,10 @@ python3 -m walkthru.server 8000
 
 WASD to move (A/D strafe), arrow left/right to turn, M toggles the
 menu. The menu loads any of the demo plans, uploads your own PNG
-(parsed server-side, never persisted), and sets the plan's real-world
-width in meters — areas and the HUD rescale instantly. The minimap
+(parsed server-side, never persisted), sets the plan's real-world
+width in meters (the model-scale knob: smaller number = smaller
+model = shorter walks; your position is preserved, not reset), and
+sets the grid detail (48-128 cells across). The minimap
 colors each detected room; the HUD shows the room you are standing in
 and its measured area.
 

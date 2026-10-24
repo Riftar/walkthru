@@ -33,9 +33,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _scene_response(self, path, width):
+    def _scene_response(self, path, width, cells=None):
         try:
-            params = {"plan_width_m": width} if width else {}
+            params = {}
+            if width:
+                params["plan_width_m"] = width
+            if cells:
+                params["grid_width"] = cells
             p = plan_mod.load_plan(path, **params)
             body = scene_mod.scene_json(p).encode()
         except Exception as e:  # parser boundary: never leak a traceback
@@ -54,6 +58,19 @@ class Handler(BaseHTTPRequestHandler):
             return -1
         return w if 1.0 <= w <= 200.0 else -1
 
+    @staticmethod
+    def _cells(query):
+        """Grid resolution (model scale, in cells across the image)."""
+        qs = parse_qs(query)
+        raw = (qs.get("cells") or [""])[0]
+        if not raw:
+            return None
+        try:
+            n = int(raw)
+        except ValueError:
+            return -1
+        return n if 16 <= n <= 256 else -1
+
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == "/api/scene":
@@ -61,13 +78,16 @@ class Handler(BaseHTTPRequestHandler):
             width = self._width(url.query)
             if width == -1:
                 return self._send(400, b"width must be meters in [1,200]")
+            cells = self._cells(url.query)
+            if cells == -1:
+                return self._send(400, b"cells must be an int in [16,256]")
             base = posixpath.basename(name)
             if name != base or not name.endswith(".png"):
                 return self._send(400, b"bad plan name")
             path = os.path.join(FIXTURES, base)
             if not os.path.isfile(path):
                 return self._send(404, b"no such plan")
-            return self._scene_response(path, width)
+            return self._scene_response(path, width, cells)
 
         rel = "index.html" if url.path == "/" else url.path.lstrip("/")
         base = posixpath.basename(rel)
@@ -90,6 +110,9 @@ class Handler(BaseHTTPRequestHandler):
         width = self._width(urlparse(self.path).query)
         if width == -1:
             return self._send(400, b"width must be meters in [1,200]")
+        cells = self._cells(urlparse(self.path).query)
+        if cells == -1:
+            return self._send(400, b"cells must be an int in [16,256]")
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -102,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
-            return self._scene_response(path, width)
+            return self._scene_response(path, width, cells)
         finally:
             os.unlink(path)
 

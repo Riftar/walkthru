@@ -106,6 +106,18 @@ class TestServer(unittest.TestCase):
             status = e.code; e.read(); e.close()
         self.assertEqual(status, 400)
 
+    def test_cells_param_scales_grid(self):
+        status, body = self.get("/api/scene?plan=flat1.png&cells=48")
+        self.assertEqual(status, 200)
+        scene = json.loads(body)
+        self.assertEqual(scene["width"], 48)
+        self.assertEqual(len(scene["rooms"]), 3)
+
+    def test_cells_validated(self):
+        for bad in ("8", "999", "abc"):
+            status, _ = self.get("/api/scene?plan=flat1.png&cells=" + bad)
+            self.assertEqual(status, 400, bad)
+
     def test_no_subpath_serving(self):
         status, _ = self.get("/walkthru/plan.py")
         self.assertEqual(status, 404)

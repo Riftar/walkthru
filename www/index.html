@@ -38,8 +38,15 @@
   <select id="plan"></select>
   <label>or load your own PNG</label>
   <input type="file" id="file" accept="image/png">
-  <label>plan width (meters)</label>
+  <label>model scale: plan width in meters<br>(smaller number = smaller model = shorter walks)</label>
   <input type="number" id="width" min="1" max="200" step="0.5" value="12">
+  <label>detail (grid cells across)</label>
+  <select id="cells">
+    <option value="48">48 (coarse)</option>
+    <option value="64">64</option>
+    <option value="96" selected>96 (default)</option>
+    <option value="128">128 (fine)</option>
+  </select>
   <label><input type="checkbox" id="menuOpen" checked style="max-width:none"> show menu (M)</label>
 </div>
 <div id="hud">loading…</div>
@@ -289,12 +296,38 @@ function startWalk(s, label) {
   err.style.display = "none"; msg.textContent = "";
 }
 
-function loadScene(url, label) {
+function nearestWalkable(x, y) {
+  if (walkable(x | 0, y | 0)) return [x, y];
+  for (let r = 1; r <= 8; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        if (walkable((x + dx) | 0, (y + dy) | 0)) return [x + dx, y + dy];
+      }
+    }
+  }
+  return null;
+}
+
+function loadScene(url, label, keepPos) {
+  // keepPos: same plan, new scale/detail -> keep where you were standing
+  const prev = (keepPos && scene) ?
+    { fx: px / scene.width, fy: py / scene.height, ang: ang } : null;
   msg.textContent = " loading…";
   fetch(url).then(r => {
     if (!r.ok) return r.text().then(t => { throw new Error("HTTP " + r.status + " " + t); });
     return r.json();
-  }).then(s => { startWalk(s, label); startLoopIfNeeded(); })
+  }).then(s => {
+    scene = s; planLabel = label;
+    err.style.display = "none"; msg.textContent = "";
+    let placed = false;
+    if (prev) {
+      const spot = nearestWalkable(prev.fx * s.width + 0.5, prev.fy * s.height + 0.5);
+      if (spot) { px = spot[0]; py = spot[1]; ang = prev.ang; placed = true; }
+    }
+    if (!placed) { px = s.spawn[0] + 0.5; py = s.spawn[1] + 0.5; ang = 0; }
+    startLoopIfNeeded();
+  })
   .catch(e => {
     msg.textContent = "";
     err.style.display = "grid";
@@ -313,18 +346,22 @@ const fileInput = document.getElementById("file");
 menuOpen.addEventListener("change", () => {
   document.getElementById("menu").style.display = menuOpen.checked ? "block" : "none";
 });
+const cellsSel = document.getElementById("cells");
 function sceneUrl(name) {
   return "/api/scene?plan=" + encodeURIComponent(name) +
-    "&width=" + encodeURIComponent(widthInput.value || 12);
+    "&width=" + encodeURIComponent(widthInput.value || 12) +
+    "&cells=" + encodeURIComponent(cellsSel.value || 96);
 }
 planSel.addEventListener("change", () => loadScene(sceneUrl(planSel.value), planSel.value));
-widthInput.addEventListener("change", () => loadScene(sceneUrl(planSel.value), planSel.value));
+widthInput.addEventListener("change", () => loadScene(sceneUrl(planSel.value), planSel.value, true));
+cellsSel.addEventListener("change", () => loadScene(sceneUrl(planSel.value), planSel.value, true));
 fileInput.addEventListener("change", () => {
   const f = fileInput.files[0];
   if (!f) return;
   msg.textContent = " parsing " + f.name + "…";
   f.arrayBuffer().then(buf =>
-    fetch("/api/plan?width=" + encodeURIComponent(widthInput.value || 12),
+    fetch("/api/plan?width=" + encodeURIComponent(widthInput.value || 12) +
+          "&cells=" + encodeURIComponent(cellsSel.value || 96),
           { method: "POST", body: buf, headers: { "Content-Type": "image/png" } }))
   .then(r => {
     if (!r.ok) return r.text().then(t => { throw new Error(t); });
