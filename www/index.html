@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>walkthru</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0c0c0e; overflow: hidden; }
+  canvas#view { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+  #hud {
+    position: fixed; left: 12px; bottom: 10px; font: 12px/1.6 ui-monospace, monospace;
+    color: #cfcfd6; background: rgba(12,12,14,.72); padding: 8px 12px;
+    border: 1px solid #2a2a30; border-radius: 4px; white-space: pre;
+  }
+  #map { position: fixed; right: 12px; top: 12px; border: 1px solid #2a2a30;
+         border-radius: 4px; background: rgba(12,12,14,.72); }
+  #err { position: fixed; inset: 0; display: none; place-items: center;
+         color: #e8e8ee; font: 14px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<canvas id="map" width="150" height="112"></canvas>
+<div id="hud">loading…</div>
+<div id="err"></div>
+<script>
+"use strict";
+
+// Cell values from the server: 0 floor, 1 wall, 2 door, 3 void.
+const COLORS = {
+  1: [96, 96, 104],    // wall  — cool gray
+  2: [138, 92, 44],    // door  — wood brown
+  3: [42, 42, 48],     // void  — near black
+};
+const CEILING = "#131317", FLOOR = "#222228";
+
+const params = new URLSearchParams(location.search);
+const planName = params.get("plan") || "flat1.png";
+
+const view = document.getElementById("view");
+const ctx = view.getContext("2d");
+const map = document.getElementById("map");
+const mctx = map.getContext("2d");
+const hud = document.getElementById("hud");
+const err = document.getElementById("err");
+
+let scene = null;
+let px = 0, py = 0, ang = 0;   // player position (cells) and heading (rad)
+const SPEED = 3.2, TURN = 2.4; // cells/s, rad/s
+const RADIUS = 0.22;
+const keys = {};
+addEventListener("keydown", e => { keys[e.code] = true; if (e.code.startsWith("Arrow")) e.preventDefault(); });
+addEventListener("keyup", e => { keys[e.code] = false; });
+
+function cell(x, y) {
+  if (y < 0 || y >= scene.height || x < 0 || x >= scene.width) return 1;
+  return +scene.grid[y][x];
+}
+function walkable(x, y) { const c = cell(x | 0, y | 0); return c === 0 || c === 2; }
+function roomIdAt(x, y) {
+  if (y < 0 || y >= scene.height || x < 0 || x >= scene.width) return 0;
+  return +scene.room_ids[y][x];
+}
+function tryMove(nx, ny) {
+  const offs = [[0, 0], [RADIUS, 0], [-RADIUS, 0], [0, RADIUS], [0, -RADIUS]];
+  if (offs.every(o => walkable(nx + o[0], ny + o[1]))) { px = nx; py = ny; }
+}
+
+function step(dt) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  let dx = 0, dy = 0;
+  if (keys.KeyW || keys.ArrowUp)    { dx += c; dy += s; }
+  if (keys.KeyS || keys.ArrowDown)  { dx -= c; dy -= s; }
+  if (keys.KeyA)                    { dx += s; dy -= c; }
+  if (keys.KeyD)                    { dx -= s; dy += c; }
+  if (keys.ArrowLeft)  ang -= TURN * dt;
+  if (keys.ArrowRight) ang += TURN * dt;
+  const len = Math.hypot(dx, dy);
+  if (len > 0) tryMove(px + dx / len * SPEED * dt, py + dy / len * SPEED * dt);
+}
+
+function render() {
+  const w = view.width, h = view.height;
+  ctx.fillStyle = CEILING; ctx.fillRect(0, 0, w, h / 2);
+  ctx.fillStyle = FLOOR;   ctx.fillRect(0, h / 2, w, h / 2);
+
+  const dirX = Math.cos(ang), dirY = Math.sin(ang);
+  const planeX = -dirY * 0.66, planeY = dirX * 0.66;
+  for (let col = 0; col < w; col++) {
+    const camX = 2 * col / w - 1;
+    let rx = dirX + planeX * camX, ry = dirY + planeY * camX;
+    let mx = px | 0, my = py | 0;
+    const ddx = Math.abs(1 / (rx || 1e-9)), ddy = Math.abs(1 / (ry || 1e-9));
+    let stepX, stepY, sdx, sdy;
+    if (rx < 0) { stepX = -1; sdx = (px - mx) * ddx; } else { stepX = 1; sdx = (mx + 1 - px) * ddx; }
+    if (ry < 0) { stepY = -1; sdy = (py - my) * ddy; } else { stepY = 1; sdy = (my + 1 - py) * ddy; }
+    let side = 0, hit = 0, guard = 0;
+    while (!hit && guard++ < 256) {
+      if (sdx < sdy) { sdx += ddx; mx += stepX; side = 0; }
+      else           { sdy += ddy; my += stepY; side = 1; }
+      hit = cell(mx, my);
+    }
+    if (!hit) continue;
+    const dist = side === 0 ? sdx - ddx : sdy - ddy;
+    if (dist <= 0) continue;
+    const lineH = Math.floor(h / dist);
+    const y0 = Math.max(0, (h - lineH) / 2), y1 = Math.min(h, (h + lineH) / 2);
+    const base = COLORS[hit] || COLORS[1];
+    const shade = (side === 1 ? 0.72 : 1) * Math.min(1, 1.6 / (1 + dist * 0.35));
+    ctx.fillStyle = "rgb(" + base.map(v => Math.round(v * shade)).join(",") + ")";
+    ctx.fillRect(col, y0, 1, y1 - y0);
+  }
+}
+
+function renderMap() {
+  const s = Math.min(map.width / scene.width, map.height / scene.height);
+  mctx.clearRect(0, 0, map.width, map.height);
+  for (let y = 0; y < scene.height; y++) {
+    for (let x = 0; x < scene.width; x++) {
+      const rid = roomIdAt(x, y), c = +scene.grid[y][x];
+      if (rid) {
+        mctx.fillStyle = "hsl(" + (rid * 67 % 360) + ",32%,38%)";
+      } else if (c === 2) {
+        mctx.fillStyle = "#8a5c2c";
+      } else {
+        mctx.fillStyle = "#1c1c22";
+      }
+      mctx.fillRect(x * s, y * s, s + 0.5, s + 0.5);
+    }
+  }
+  mctx.fillStyle = "#f2f2f6";
+  mctx.beginPath();
+  mctx.arc(px * s, py * s, 2.5, 0, Math.PI * 2);
+  mctx.fill();
+  mctx.strokeStyle = "#f2f2f6";
+  mctx.beginPath();
+  mctx.moveTo(px * s, py * s);
+  mctx.lineTo((px + Math.cos(ang) * 5) * s, (py + Math.sin(ang) * 5) * s);
+  mctx.stroke();
+}
+
+function renderHud() {
+  const rid = roomIdAt(px | 0, py | 0);
+  const room = rid ? scene.rooms[rid - 1] : null;
+  const pos = (px * scene.cell_m).toFixed(1) + "m, " + (py * scene.cell_m).toFixed(1) + "m";
+  hud.textContent = planName + "\n" +
+    (room ? room.name + "  " + room.area_m2 + " m²" : "—") + "\n" +
+    pos + "\nWASD move · ←/→ turn";
+}
+
+let last = 0;
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000 || 0);
+  last = t;
+  step(dt);
+  render();
+  renderMap();
+  renderHud();
+  requestAnimationFrame(frame);
+}
+
+function resize() {
+  view.width = innerWidth; view.height = innerHeight;
+}
+
+addEventListener("resize", resize);
+resize();
+
+fetch("/api/scene?plan=" + encodeURIComponent(planName))
+  .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+  .then(s => {
+    scene = s;
+    px = s.spawn[0] + 0.5; py = s.spawn[1] + 0.5; ang = 0;
+    requestAnimationFrame(frame);
+  })
+  .catch(e => {
+    err.style.display = "grid";
+    err.textContent = "failed to load plan '" + planName + "': " + e.message +
+      "\ntry ?plan=flat1.png (or venue.png / offices.png)";
+  });
+</script>
+</body>
+</html>
