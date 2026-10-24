@@ -127,7 +127,11 @@ view.width = RW; view.height = RH;
 const frameImg = ctx.createImageData(RW, RH);
 let scene = null, planLabel = "";
 let px = 0, py = 0, ang = 0;
-const SPEED = 3.2, TURN = 2.4, RADIUS = 0.22, FOV = 0.78;
+const TURN = 2.4, FOV = 0.85;
+const WALK_MPS = 1.4, RUN_MPS = 3.2;   // real-world speeds, m/s
+function radiusCells() {               // 0.2 m body radius, in cells
+  return Math.min(0.45, Math.max(0.12, 0.2 / scene.cell_m));
+}
 const keys = {};
 addEventListener("keydown", e => {
   keys[e.code] = true;
@@ -146,7 +150,8 @@ function roomIdAt(x, y) {
   return +scene.room_ids[y][x];
 }
 function tryMove(nx, ny) {
-  const offs = [[0, 0], [RADIUS, 0], [-RADIUS, 0], [0, RADIUS], [0, -RADIUS]];
+  const R = radiusCells();
+  const offs = [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]];
   if (offs.every(o => walkable(nx + o[0], ny + o[1]))) { px = nx; py = ny; }
 }
 
@@ -160,7 +165,12 @@ function step(dt) {
   if (keys.ArrowLeft)  ang -= TURN * dt;
   if (keys.ArrowRight) ang += TURN * dt;
   const len = Math.hypot(dx, dy);
-  if (len > 0) tryMove(px + dx / len * SPEED * dt, py + dy / len * SPEED * dt);
+  if (len > 0) {
+    // speed is meters/second; declared scale (cell_m) converts to cells
+    const mps = (keys.ShiftLeft || keys.ShiftRight) ? RUN_MPS : WALK_MPS;
+    const cellsPerSec = mps / scene.cell_m;
+    tryMove(px + dx / len * cellsPerSec * dt, py + dy / len * cellsPerSec * dt);
+  }
 }
 
 // ---------- render: textured floor/ceiling casting + textured DDA walls ----------
@@ -255,7 +265,7 @@ function renderHud() {
   const pos = (px * scene.cell_m).toFixed(1) + "m, " + (py * scene.cell_m).toFixed(1) + "m";
   hud.textContent = planLabel + "\n" +
     (room ? room.name + "  " + room.area_m2 + " m²" : "—") + "\n" + pos +
-    "\nWASD move · ←/→ turn · M menu";
+    "\nWASD move · ←/→ turn · Shift run · M menu";
 }
 
 let last = 0;
@@ -297,7 +307,7 @@ const menuOpen = document.getElementById("menuOpen");
 const planSel = document.getElementById("plan");
 const widthInput = document.getElementById("width");
 const fileInput = document.getElementById("file");
-["flat1.png", "venue.png", "offices.png"].forEach(n => {
+["flat1.png", "venue.png", "offices.png", "house1.png", "house2.png"].forEach(n => {
   const o = document.createElement("option"); o.value = o.textContent = n; planSel.appendChild(o);
 });
 menuOpen.addEventListener("change", () => {

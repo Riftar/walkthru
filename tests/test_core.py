@@ -88,6 +88,27 @@ class TestPlan(unittest.TestCase):
                         covered += 1
             self.assertEqual(covered, total, name)
 
+    def test_scene_is_renderer_agnostic_contract(self):
+        """The scene JSON must carry everything an alternative renderer
+        (e.g. a WebGL/three.js client) needs: metric scale, wall height,
+        per-cell grid, room membership, doors, and wall rectangles.
+        Parser and server never change shape without this test changing."""
+        s = scene_mod.build_scene(self.plans["flat1.png"])
+        for key in ("cell_m", "wall_height_m", "grid", "room_ids",
+                    "doors", "walls", "rooms", "spawn", "width", "height"):
+            self.assertIn(key, s)
+        self.assertTrue(all(len(w) == 4 for w in s["walls"]))
+        self.assertGreater(len(s["walls"]), 4)
+
+    def test_sample_plans_parse(self):
+        """Real-world sample plans shipped in fixtures/ (hand-contributed,
+        not generated): parsing must find a walkable multi-room layout."""
+        for name, min_rooms in (("house1.png", 5), ("house2.png", 5)):
+            p = plan_mod.load_plan(fixture_path(name))
+            self.assertGreaterEqual(len(p.rooms), min_rooms, name)
+            self.assertIsNotNone(p.spawn, name)
+            self.assertTrue(p.walkable(*p.spawn), name)
+
     def test_scale_is_declared_not_invented(self):
         p = self.plans["flat1.png"]  # 192px wide, block=2 -> cell_m = 12*2/192
         self.assertAlmostEqual(p.cell_m, 0.125)
