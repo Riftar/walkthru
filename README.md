@@ -26,10 +26,14 @@ and its measured area.
 - `walkthru/pngio.py` — minimal 8-bit PNG reader/writer (zlib +
   struct, defiltering included). Honest subset: gray/RGB/RGBA,
   non-interlaced; anything else is a clear error.
-- `walkthru/plan.py` — the parser. Downsamples to an occupancy grid
+- `walkthru/plan.py` — the parser. Handles both polarities (dark lines
+  on white paper or light lines on dark renders; "auto" picks the
+  minority side as walls). Downsamples to an occupancy grid
   (block-minimum luma, so thin walls survive), detects doors as short
-  floor runs piercing a wall, flood-fills rooms, extracts axis-aligned
-  wall rectangles, and picks a spawn. Scale is a declared parameter
+  floor runs whose jambs sit in a real wall — wall continuing past
+  each jamb along the wall axis — which rejects the text and symbols
+  covering real plans. Flood-fills rooms, extracts axis-aligned wall
+  rectangles, and picks a spawn. Scale is a declared parameter
   (`plan_width_m`), because an image cannot prove its own size.
 - `walkthru/scene.py` — Plan → compact deterministic JSON.
 - `walkthru/server.py` — stdlib `http.server`, loopback by default;
